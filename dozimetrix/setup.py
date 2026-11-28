@@ -4,9 +4,9 @@ While the database has no user, every page redirects to ``/setup``. The first st
 one-time setup token (a 4-digit PIN): the web service prints it to its log at start and writes
 it to ``<data_dir>/setup-token`` (mode 0600), so only someone with access to the server can claim
 a fresh install, even on a public URL. A PIN is short, so it is replaced by a new one after
-``MAX_TOKEN_FAILS`` wrong guesses (on top of the per-address throttle). Creating the first admin signs them in; the later
-steps (site, DICOM nodes, growth tables) are ordinary admin calls, and the wizard can be
-opened again from ``/setup`` by an admin until it is marked done.
+``MAX_TOKEN_FAILS`` wrong guesses (on top of the per-address throttle). Creating the first
+admin signs them in; the later steps (site, DICOM nodes, growth tables) are ordinary admin
+calls, and the wizard can be opened again from ``/setup`` by an admin until it is marked done.
 """
 
 from __future__ import annotations
