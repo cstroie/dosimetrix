@@ -72,17 +72,57 @@ files become root-owned. From a checkout elsewhere, `install.sh` does a normal (
 instead, and an update means running it again.
 
 Options: `--no-db` (use an existing or remote database: edit the `url` in the toml),
-`--no-services`, `--no-packages`, `--user NAME`. Paths are fixed because the unit files use them.
+`--no-services`, `--no-packages`, `--user NAME`, `--listen ADDR` and `--no-https` (see
+[Remote access](#remote-access-over-plain-http)). Paths are fixed because the unit files use them.
+
+The installer stops short instead of starting broken services: if the database url in the toml
+still has the placeholder password, or `migrate`/`seed` fail, it skips the services, says why and
+exits with status 1. Fix the cause and run it again. At the end it checks that the web UI
+answers and, on a fresh install, prints the one-time **setup PIN**.
 
 ## After the installation
 
 - Edit `[pacs]`, `[dicom]` and `[notify]` in `/etc/dozimetrix/dozimetrix.toml`, then restart the
   services. Start `dozimetrix-qr` only once `[pacs]` is right.
 - **Back up `/var/lib/dozimetrix/secret`**: pseudonyms and sessions depend on it.
-- Publish the web UI through an HTTPS reverse proxy and keep `secure_cookies = true`.
+- Publish the web UI through an HTTPS reverse proxy and keep `secure_cookies = true` (for plain HTTP see Remote access).
 - Give InnoDB enough memory for the data (`innodb_buffer_pool_size`, about the size of the data).
 - Register the AE `DOZIMETRIX` (this host, port 11112) on the modalities and the PACS that send dose objects.
 - A HIS/RIS server: `systemctl enable --now dozimetrix-his` (see docs/deploy.md).
+
+## Remote access over plain HTTP
+
+By default the web UI listens on `127.0.0.1` and `secure_cookies = true`. To set it up from
+another machine without an HTTPS proxy, both need changing, and the second is easy to miss:
+
+| Setting (`/etc/dozimetrix/dozimetrix.toml`) | Value | Why |
+|---|---|---|
+| `[web] host` | `"0.0.0.0"` | listen on every interface (or one address) |
+| `[security] secure_cookies` | `false` | with `true` the login cookie is marked `Secure`, and browsers drop it on `http://`: the first admin is created, then **nobody can stay signed in** and `/setup` sends you to the login page |
+
+`sudo ./install.sh --listen 0.0.0.0 --no-https` writes both into a **new** config; an existing
+config is never touched, so edit it and `sudo systemctl restart dozimetrix-web`.
+
+Over plain HTTP the session cookie and the password cross the network unencrypted. That is
+acceptable on a trusted LAN for the first setup, not beyond it. Afterwards put an HTTPS reverse
+proxy in front (nginx, Apache, Caddy), set `secure_cookies = true` and `host = "127.0.0.1"`
+again. Another way that needs no change: `ssh -L 8104:localhost:8104 <server>` and open
+`http://localhost:8104` (Chrome and Firefox accept `Secure` cookies on `localhost`; Safari does not).
+
+Also set `[dicom] allowed_aets` to your modalities' AE titles: empty means any host that can
+reach port 11112 may send objects.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| The first admin was created, then every page returns to the login page | `secure_cookies = true` over `http://` (see above). |
+| `dozimetrix-web` / `-receive` keep restarting: `Access denied for user 'dozimetrix'@'localhost'` | The `url` in the toml has a wrong or placeholder (`CHANGE-ME`) password. Set the real one, or recreate the user, then `migrate`, `seed` and restart. |
+| `/setup` asks for a token and you did not see it | It is a 4-digit PIN: `sudo journalctl -u dozimetrix-web -o cat \| grep 'setup token' \| tail -1`, or `sudo cat /var/lib/dozimetrix/setup-token`. A restart of the web service issues a new one; so do 10 wrong tries. |
+| `/setup` redirects to `/login` | An account already exists; the PIN is only for an empty install. |
+| `git pull` fails with `.git/FETCH_HEAD: Permission denied` | A `sudo git ...` left root-owned files in `.git`: `sudo chown -R $USER .git`. Run git as your own user. |
+| The code did not change after `git pull` | Restart the services; for a copying install (checkout elsewhere) run `install.sh` again. |
+| `cp: cannot stat .../deploy/...` | The checkout lost `deploy/`: `git checkout -- deploy`. |
 
 ## Manual installation
 

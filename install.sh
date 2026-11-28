@@ -13,6 +13,9 @@
 #   --no-services   do not install or enable the system services
 #   --no-packages   never install system packages (stop if something is missing)
 #   --user NAME     service account (default: dozimetrix)
+#   --listen ADDR   web UI address for a NEW config (default 127.0.0.1; 0.0.0.0 = every interface)
+#   --no-https      no HTTPS proxy in front: a NEW config gets secure_cookies = false, since
+#                   browsers drop Secure cookies on http:// and nobody could stay logged in
 #
 # Safe to run again: existing configuration, secret and database are never overwritten.
 set -euo pipefail
@@ -31,7 +34,8 @@ DICOM_PORT=11112
 MIN_PY_MINOR=12                   # Python >= 3.12
 MIN_MARIADB="10.6"
 
-CHECK_ONLY=0 ASSUME_YES=0 DRY=0 DO_DB=1 DO_SERVICES=1 DO_PACKAGES=1
+CHECK_ONLY=0 ASSUME_YES=0 DRY=0 DO_DB=1 DO_SERVICES=1 DO_PACKAGES=1 NO_HTTPS=0
+LISTEN=127.0.0.1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check) CHECK_ONLY=1 ;;
@@ -41,7 +45,9 @@ while [[ $# -gt 0 ]]; do
         --no-services) DO_SERVICES=0 ;;
         --no-packages) DO_PACKAGES=0 ;;
         --user) APP_USER="${2:?--user needs a name}"; shift ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --listen) LISTEN="${2:?--listen needs an address}"; shift ;;
+        --no-https) NO_HTTPS=1 ;;
+        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
@@ -67,6 +73,14 @@ run() { if (( DRY )); then echo "  [dry-run] $*"; else "$@"; fi; }
 
 SUDO=""
 [[ $EUID -eq 0 ]] || SUDO="sudo"
+
+# The config folder is 0750 root:$APP_USER: as another user "-f" says "missing" and the installer
+# would write the example over a real config. Ask with the privilege that can see it.
+conf_exists() {
+    [[ -f "$CONF" ]] && return 0
+    [[ $EUID -eq 0 ]] && return 1
+    if (( CHECK_ONLY )); then sudo -n test -f "$CONF" 2>/dev/null; else $SUDO test -f "$CONF"; fi
+}
 
 ver_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]; }  # $1 >= $2
 
@@ -169,7 +183,7 @@ for pp in "$WEB_PORT:web UI" "$DICOM_PORT:DICOM receiver"; do
 done
 
 if [[ -x "$APP_HOME/.venv/bin/dozimetrix" ]]; then warn "already installed in $APP_HOME: this run upgrades it"; fi
-if [[ -f "$CONF" ]]; then warn "$CONF exists: it is kept as it is"; fi
+if conf_exists; then warn "$CONF exists: it is kept as it is"; fi
 if getent passwd "$APP_USER" >/dev/null; then ok "service account $APP_USER exists"; fi
 
 if (( CHECK_ONLY )); then
@@ -255,6 +269,11 @@ if [[ "$(realpath "$SRC")" == "$(realpath "$APP_HOME")" ]]; then
     # the checkout is the install: the code runs from it (update with git pull), the
     # virtualenv only holds the dependencies
     run $SUDO "$APP_HOME/.venv/bin/pip" install --upgrade -e "${SRC}${PIP_EXTRA}"
+    # pip ran as root: give its build leftovers back to the checkout's owner (git pull must work)
+    run $SUDO rm -rf "$APP_HOME/build"
+    if [[ -d "$APP_HOME/dozimetrix.egg-info" ]]; then
+        run $SUDO chown -R "$(stat -c %u:%g "$SRC/pyproject.toml")" "$APP_HOME/dozimetrix.egg-info"
+    fi
 else
     run $SUDO "$APP_HOME/.venv/bin/pip" install --upgrade "${SRC}${PIP_EXTRA}"
 fi
@@ -274,7 +293,7 @@ as_app() {  # run a command as the service account
 
 # ------------------------------------------------------------ 7. database
 DB_PASS=""
-if (( DO_DB )) && [[ ! -f "$CONF" ]]; then
+if (( DO_DB )) && ! conf_exists; then
     step "7. Database"
     if [[ -z "${DB_CLIENT:-}" ]] && (( ! DRY )); then
         warn "no MariaDB client: create the database by hand (INSTALL.md) and edit $CONF"
@@ -311,33 +330,60 @@ fi
 
 # ------------------------------------------------------------ 8. config
 step "8. Configuration"
-if [[ -f "$CONF" ]]; then ok "$CONF kept"
+if conf_exists; then ok "$CONF kept"
 elif ask "Write $CONF from the example?"; then
     tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
     cp "$SRC/deploy/dozimetrix.toml.example" "$tmp"
     if [[ -n "$DB_PASS" ]]; then sed -i "s|CHANGE-ME|$DB_PASS|" "$tmp"
     else warn "no database password set: edit the [database] url in $CONF"; fi
+    if [[ "$LISTEN" != 127.0.0.1 ]]; then sed -i "s|^host = \"127\.0\.0\.1\"|host = \"$LISTEN\"|" "$tmp"; fi
+    if (( NO_HTTPS )); then
+        sed -i 's|^secure_cookies = true|secure_cookies = false|' "$tmp"
+        warn "secure_cookies = false: session cookies travel unencrypted over http://. Fine on a trusted LAN or for the first setup; put an HTTPS proxy in front and set it back to true"
+    elif [[ "$LISTEN" != 127.0.0.1 && "$LISTEN" != localhost ]]; then
+        warn "listening on $LISTEN with secure_cookies = true: logins only work through an HTTPS proxy (browsers drop Secure cookies on http://). Without one, run again with --no-https or set secure_cookies = false in $CONF"
+    fi
     run $SUDO install -m 0640 -o root -g "$APP_USER" "$tmp" "$CONF"
     warn "edit [pacs], [dicom] and [notify] in $CONF for your site"
+fi
+if conf_exists && { [[ "$LISTEN" != 127.0.0.1 ]] || (( NO_HTTPS )); } && [[ -z "${tmp:-}" ]]; then
+    warn "$CONF already existed: --listen / --no-https were not applied. Set [web] host and [security] secure_cookies there"
+fi
+
+# a placeholder password means the database step did not finish: do not start services on it
+DB_OK=1
+if (( ! DRY )) && conf_exists && $SUDO grep -qE '^url *=.*CHANGE-ME' "$CONF"; then
+    DB_OK=0
+    warn "the [database] url in $CONF still has the placeholder password CHANGE-ME"
+    warn "create the database and user (INSTALL.md, 'by hand'), put the real url there, run install.sh again"
 fi
 
 # ----------------------------------------------------- 9. schema and seeds
 step "9. Schema and seed data"
-if [[ -f "$CONF" ]] || (( DRY )); then
+if (( ! DB_OK )); then warn "skipped: the database is not set up (see above)"
+elif conf_exists || (( DRY )); then
     if ask "Run 'migrate' and 'seed'?"; then
         if as_app "${DOZ[@]}" migrate && as_app "${DOZ[@]}" seed; then ok "database ready"
-        else warn "migrate/seed failed: check the [database] url in $CONF, then run them by hand"; fi
+        else
+            DB_OK=0
+            warn "migrate/seed failed: check the [database] url in $CONF (user, password, database)"
+        fi
     fi
-else warn "no $CONF: migrate and seed skipped"; fi
+else DB_OK=0; warn "no $CONF: migrate and seed skipped"; fi
 
 # ------------------------------------------------------------- 10. services
-if (( DO_SERVICES )) && [[ "$INIT" != none ]]; then
+SERVICES_STARTED=0
+if (( DO_SERVICES )) && (( ! DB_OK )); then
+    step "10. Services ($INIT)"
+    warn "not installed: they would crash on the database. Fix the above, then run install.sh again"
+elif (( DO_SERVICES )) && [[ "$INIT" != none ]]; then
     step "10. Services ($INIT)"
     if ask "Install and enable the $INIT services (web, receive + periodic jobs)?"; then
         if [[ "$INIT" == systemd ]]; then
             run $SUDO cp "$SRC"/deploy/systemd/*.service "$SRC"/deploy/systemd/*.timer /etc/systemd/system/
             run $SUDO systemctl daemon-reload
             run $SUDO systemctl enable --now dozimetrix-web dozimetrix-receive
+            SERVICES_STARTED=1
             if ask "Also start dozimetrix-qr? (it queries the PACS: set [pacs] in $CONF first)"; then
                 run $SUDO systemctl enable --now dozimetrix-qr
             fi
@@ -347,6 +393,7 @@ if (( DO_SERVICES )) && [[ "$INIT" != none ]]; then
             for d in web receive his qr; do run $SUDO ln -sf dozimetrix "/etc/init.d/dozimetrix.$d"; done
             [[ -f /etc/conf.d/dozimetrix ]] || run $SUDO install -m 0644 "$SRC/deploy/openrc/dozimetrix.confd" /etc/conf.d/dozimetrix
             for d in web receive; do run $SUDO rc-update add "dozimetrix.$d" default; run $SUDO rc-service "dozimetrix.$d" start; done
+            SERVICES_STARTED=1
             warn "periodic jobs run from cron: install cronie, then copy deploy/cron/dozimetrix to /etc/cron.d/"
         fi
     fi
@@ -371,13 +418,30 @@ if (( ! DRY && ! CHECK_ONLY )); then
         done
     fi
 fi
+# does the web UI answer? (a service that is "active" can still be restarting in a crash loop)
+if (( SERVICES_STARTED && ! DRY )) && command -v curl >/dev/null; then
+    code=000
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$WEB_PORT/login" || true)
+        [[ "$code" =~ ^[23] ]] && break
+        sleep 1
+    done
+    if [[ "$code" =~ ^[23] ]]; then ok "the web UI answers on port $WEB_PORT"
+    else
+        DB_OK=0
+        warn "the web UI does not answer on port $WEB_PORT (last status $code): journalctl -u dozimetrix-web -n 30"
+    fi
+fi
 if [[ -n "$SETUP_PIN" ]]; then
     echo "  ${B}First-run setup PIN: $SETUP_PIN${N}   (a new one is issued if the web service restarts)"
 fi
+SHOW_HOST=$LISTEN; [[ "$LISTEN" == 0.0.0.0 ]] && SHOW_HOST="<this machine's address>"
 cat <<EOF
-  Open  http://127.0.0.1:$WEB_PORT/setup  to finish with the first-run wizard (host and port: [web] in $CONF).
+  Open  http://${SHOW_HOST}:$WEB_PORT/setup  to finish with the first-run wizard (host and port: [web] in $CONF).
   The one-time setup PIN is in the web service log and in $DATA_DIR/setup-token.
   Back up $DATA_DIR/secret once it exists: pseudonyms and sessions depend on it.
-  Put an HTTPS reverse proxy (nginx, Apache) in front of the web UI; keep secure_cookies = true.
+  Put an HTTPS reverse proxy (nginx, Apache) in front of the web UI; keep secure_cookies = true there
+  (over plain http:// logins need secure_cookies = false: see INSTALL.md, "Remote access").
   DICOM: register AE DOZIMETRIX / this host / $DICOM_PORT on the modalities and the PACS.
 EOF
+(( DB_OK )) || { echo "${Y}Installation incomplete: see the warnings above.${N}"; exit 1; }
