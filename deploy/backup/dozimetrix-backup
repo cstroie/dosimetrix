@@ -135,6 +135,7 @@ fi
 if [ "$MODE" = docker ]; then
     dc exec -T web sh -c 'date +%s >/var/lib/dozimetrix/backup-last-ok' || true
 else
-    date +%s >"$DATA_DIR/backup-last-ok" 2>/dev/null || true
+    # a timestamp only: world-readable, or the web app (another user) reports "no backup recorded"
+    { date +%s >"$DATA_DIR/backup-last-ok" && chmod 644 "$DATA_DIR/backup-last-ok"; } 2>/dev/null || true
 fi
 echo "backup $STAMP done: $(ls "$STAGING" | grep -c "$STAMP") files in $STAGING${DEST:+, copied to $DEST}"
