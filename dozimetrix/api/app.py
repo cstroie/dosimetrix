@@ -1190,6 +1190,44 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None,
         session.commit()
         return data.his_summary(session, study_id)
 
+    @app.post("/api/studies/{study_id}/reanalyze")
+    def study_reanalyze(study_id: int, request: Request, user: User = Depends(admin_user),
+                        session: Session = Depends(db)):
+        """Classify and derive this study again from its stored events (nothing is fetched)."""
+        from .. import maintenance
+
+        if session.get(Study, study_id) is None:
+            raise HTTPException(404, "study not found")
+        out = maintenance.reanalyze_studies(session, [study_id])
+        _audit(session, request, user, "study.reanalyze", f"study:{study_id}", out)
+        session.commit()
+        return out
+
+    @app.post("/api/studies/{study_id}/refetch", status_code=202)
+    def study_refetch(study_id: int, request: Request, user: User = Depends(admin_user),
+                      session: Session = Depends(db)):
+        """Forget this study and retrieve it from the PACS again, in a detached process (the
+        study is gone until the retrieval has imported it again)."""
+        import subprocess
+        import sys
+
+        if session.get(Study, study_id) is None:
+            raise HTTPException(404, "study not found")
+        cmd = [sys.executable, "-m", "dozimetrix.cli"]
+        if settings.source:
+            cmd += ["--config", str(settings.source)]
+        cmd += ["study-refetch", str(study_id), "--by", user.username]
+        if not settings.source:
+            cmd += ["--url", settings.database_url]
+        logfile = settings.data_dir / "jobs.log"
+        logfile.parent.mkdir(parents=True, exist_ok=True)
+        _audit(session, request, user, "study.refetch.queued", f"study:{study_id}", None)
+        session.commit()
+        with open(logfile, "ab") as out:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out,  # noqa: S603
+                             stderr=subprocess.STDOUT, start_new_session=True)
+        return {"queued": True}
+
     @app.post("/api/import/sizes")
     def import_sizes(request: Request, apply: bool = False,
                      body: bytes = Body(..., media_type="text/csv"),

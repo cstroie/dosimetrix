@@ -17,11 +17,11 @@ import { live } from '../core/live.js';
 import { rememberList } from '../core/study-nav.js';
 
 const DEFAULT_MOD = 'CT';
-const DEFAULT_Q = 'date:90d age:>=18 origin:local -phantom';
+const DEFAULT_Q = 'date:90d origin:local -phantom';
 const SAVED_KEY = 'savedQueries.ct';  // the key predates the other modalities; kept for users' saved queries
 // One starter query, copied into the user's own saved queries the first time (nothing stored
 // yet, and no shared query to start from); from then on it is theirs: deleting it keeps it deleted.
-const STARTER = { name: 'Adult CT, last 90 days', q: DEFAULT_Q, mod: DEFAULT_MOD };
+const STARTER = { name: 'CT, last 90 days', q: DEFAULT_Q, mod: DEFAULT_MOD };
 
 const page = document.getElementById('page');
 const url = new URL(location.href);

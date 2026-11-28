@@ -9,6 +9,7 @@ import { h, toast, esc, panelHead, pageHead } from '../core/dom.js';
 import { hisPanel, weightNote } from '../components/his-panel.js';
 import { t } from '../core/i18n.js';
 import { num, smart, dap, dapUnit, clock, DAP_UNITS } from '../core/format.js';
+import { studyActions } from '../components/study-actions.js';
 import { studyHref, setGlandularity, isSample } from '../core/api.js';
 import { studyNav } from '../core/study-nav.js';
 import '../components/dx-chart.js';
@@ -473,7 +474,7 @@ export function renderStudy(page, s, { revealButton, ackAlert }) {
   page.replaceChildren(
     pageHead(title, {},
       (s.alerts || []).filter((a) => a.status === 'open').length ? h('span', { class: 'tag alert' }, `${s.alerts.filter((a) => a.status === 'open').length} alerts`) : null,
-      h('span', { class: 'spacer' }), studyNav(s.id), h('button', { class: 'btn no-print', type: 'button', onclick: () => print() }, t('study.print'))),
+      h('span', { class: 'spacer' }), studyNav(s.id), studyActions(s), h('button', { class: 'btn no-print', type: 'button', onclick: () => print() }, t('study.print'))),
     h('div', { class: 'detail' },
       h('div', { class: 'side' },
         h('section', { class: 'panel', 'aria-label': 'Patient and exam' },

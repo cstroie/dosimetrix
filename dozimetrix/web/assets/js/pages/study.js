@@ -18,6 +18,7 @@ import { renderStudy, onUnitChange } from './study-generic.js';
 import { live } from '../core/live.js';
 import { prefs } from '../core/prefs.js';
 import { studyNav } from '../core/study-nav.js';
+import { studyActions } from '../components/study-actions.js';
 
 const page = document.getElementById('page');
 const params = new URL(location.href).searchParams;
@@ -252,7 +253,7 @@ async function render() {
   page.replaceChildren(
     sampleNote || '',
     pageHead(s.description, {}, s.alerts.map((a) => h('span', { class: `tag ${a.level}`, title: a.text }, a.kind === 'kar' ? 'Ka,r ≥ alert' : 'Σ 12 wk ≥ alert')),
-      h('span', { class: 'spacer' }), unitSeg, studyNav(s.id), h('button', { class: 'btn no-print', type: 'button', onclick: () => print() }, t('study.print'))),
+      h('span', { class: 'spacer' }), unitSeg, studyNav(s.id), studyActions(s), h('button', { class: 'btn no-print', type: 'button', onclick: () => print() }, t('study.print'))),
     h('div', { class: 'detail' },
       h('div', { class: 'side' },
         h('section', { class: 'panel', 'aria-label': 'Patient and exam' },

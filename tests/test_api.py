@@ -1457,3 +1457,16 @@ def test_local_drl_refuses_a_date_in_the_selection(client):
     r = client.post("/api/drl/local", json={"name": "t", "start": "2025-01-01", "end": "2025-12-31",
                                             "q": "date:2025-06-01..", "rows": []})
     assert r.status_code == 400
+
+
+def test_study_reanalyze_is_admin_only(client):
+    login(client, "viewer", "viewer-pass-1")
+    body = client.get("/api/studies").json()
+    sid = (body["rows"] if isinstance(body, dict) else body)[0]["id"]
+    assert client.post(f"/api/studies/{sid}/reanalyze").status_code == 403
+    assert client.post(f"/api/studies/{sid}/refetch").status_code == 403
+    login(client, "boss", "boss-pass-123")
+    assert client.post("/api/studies/999999/reanalyze").status_code == 404
+    assert client.post("/api/studies/999999/refetch").status_code == 404
+    r = client.post(f"/api/studies/{sid}/reanalyze")
+    assert r.status_code == 200 and r.json() == {"studies": 1}

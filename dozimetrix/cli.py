@@ -719,6 +719,51 @@ def _cmd_refetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_study_refetch(args: argparse.Namespace) -> int:
+    """Forget one study and retrieve it from the PACS again (started by the study page)."""
+    import datetime as dt
+    import getpass
+    import logging
+
+    from .db.models import AuditLog, Study
+    from .db.session import make_engine, make_sessionmaker
+    from .maintenance import forget_studies
+    from .net import nodes, qr
+    from .net.spool import Spool, SpoolWorker
+
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(name)s %(message)s")
+    s = load_settings()
+    maker = make_sessionmaker(make_engine(args.url or s.database_url))
+    with maker() as session:
+        st = session.get(Study, args.study)
+        if st is None:
+            print("study not found")
+            return 2
+        uid, when = st.study_uid, st.study_datetime
+        node, _ = nodes.qr_node(session, s)
+        if node is None:
+            print("no PACS configured: add a DICOM node (Admin > DICOM nodes) or [pacs]")
+            return 2
+        out = forget_studies(session, [args.study])
+        session.add(AuditLog(username=args.by or f"cli:{getpass.getuser()}", action="refetch",
+                             target=f"study:{args.study}", detail=out))
+        session.commit()
+    worker = SpoolWorker(Spool(s.spool_dir), maker, _secret(), keep=s.keep_received)
+
+    def drain() -> int:
+        total = 0
+        while (n := worker.drain()):
+            total += n
+        return total
+
+    stats = qr.QRStats()
+    hit = qr.StudyHit(uid, (when or dt.datetime.now()).strftime("%Y%m%d"), set())
+    qr.retrieve_study(node, hit, worker.spool, drain, maker, stats)
+    drain()
+    print(f"study {args.study} fetched again: {dict(stats.counts)}")
+    return 0
+
+
 def _cmd_skin(args: argparse.Namespace) -> int:
     from . import skindose
     from .db.session import make_engine, make_sessionmaker
@@ -1566,6 +1611,13 @@ def build_parser() -> argparse.ArgumentParser:
     fg.add_argument("--apply", action="store_true", help="really delete (default: dry run)")
     fg.add_argument("--url")
     fg.set_defaults(func=_cmd_refetch)
+
+    sf = sub.add_parser("study-refetch", help="forget one study and retrieve it from the PACS "
+                                                "again")
+    sf.add_argument("study", type=int, help="study id")
+    sf.add_argument("--by", help="user name for the audit log")
+    sf.add_argument("--url")
+    sf.set_defaults(func=_cmd_study_refetch)
 
     sk = sub.add_parser("skin", help="estimate peak skin doses of fluoroscopy studies (batch)")
     sk.add_argument("--study", type=int, help="print the estimate for one study")

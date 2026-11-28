@@ -193,6 +193,21 @@ def forget_studies(session: Session, study_ids: list[int]) -> dict:
     return out
 
 
+def reanalyze_studies(session: Session, study_ids: list[int]) -> dict:
+    """Run the whole analysis again on stored studies: exam codes, the columns derived from
+    the events, then weights, indications, skin dose, alerts. Nothing is fetched."""
+    from . import classify
+    from .ingest.store import Helpers, derive
+
+    ids = sorted(set(study_ids))
+    h = Helpers(session).get()
+    classify.run(session, ids, classifier=h.classifier)
+    recompute_ct_columns(session, ids)
+    derive(session, ids, h)
+    session.flush()
+    return {"studies": len(ids)}
+
+
 DERIVE_TRIES = 5
 
 

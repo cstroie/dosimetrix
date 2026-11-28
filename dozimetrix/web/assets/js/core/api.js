@@ -591,6 +591,8 @@ export const updateHisServer = (id, patch) => send('PATCH', `/api/his/servers/${
 export const deleteHisServer = (id) => send('DELETE', `/api/his/servers/${id}`);
 export const checkHisServer = (id) => send('POST', `/api/his/servers/${id}/check`);
 /** POST /api/studies/{id}/his → queue the study for another HIS lookup (admin) */
+export const reanalyzeStudy = (id) => send('POST', `/api/studies/${id}/reanalyze`);
+export const refetchStudy = (id) => send('POST', `/api/studies/${id}/refetch`);
 export const requeryHis = (id) => send('POST', `/api/studies/${id}/his`);
 
 /** GET /api/studies/{id}/dose-statement → { patient, exam, when, device, doses: [{ key, label,
