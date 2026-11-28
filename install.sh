@@ -251,7 +251,13 @@ step "6. Application"
 ask "Install Dozimetrix into $APP_HOME/.venv from $SRC?" || die "nothing to do without the application"
 [[ -x "$APP_HOME/.venv/bin/python" ]] || run $SUDO "$PY" -m venv "$APP_HOME/.venv"
 run $SUDO "$APP_HOME/.venv/bin/pip" install --upgrade pip
-run $SUDO "$APP_HOME/.venv/bin/pip" install --upgrade "${SRC}${PIP_EXTRA}"
+if [[ "$(realpath "$SRC")" == "$(realpath "$APP_HOME")" ]]; then
+    # the checkout is the install: the code runs from it (update with git pull), the
+    # virtualenv only holds the dependencies
+    run $SUDO "$APP_HOME/.venv/bin/pip" install --upgrade -e "${SRC}${PIP_EXTRA}"
+else
+    run $SUDO "$APP_HOME/.venv/bin/pip" install --upgrade "${SRC}${PIP_EXTRA}"
+fi
 # the unit files and the backup scripts expect $APP_HOME/deploy
 # (skip when installing from the checkout that already is $APP_HOME: rm would delete the source)
 if [[ "$(realpath "$SRC")" != "$(realpath "$APP_HOME")" ]]; then

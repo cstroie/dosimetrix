@@ -55,6 +55,22 @@ Each step asks first (`--yes` answers all; `--dry-run` prints the commands inste
 It can be run again to upgrade: the virtualenv and `deploy/` are refreshed, the configuration,
 the database and the secret are left alone.
 
+**Checkout in `/opt/dozimetrix` (recommended).** `git clone <repo> /opt/dozimetrix` and run
+`install.sh` from there: the code then runs straight from the checkout and `.venv` only holds the
+Python packages (an editable install). To update:
+
+```sh
+cd /opt/dozimetrix && git pull
+.venv/bin/pip install -e .            # only when pyproject.toml's dependencies changed
+sudo -u dozimetrix .venv/bin/dozimetrix migrate && sudo -u dozimetrix .venv/bin/dozimetrix seed
+sudo systemctl restart dozimetrix-web dozimetrix-receive      # and dozimetrix-qr / -his if used
+```
+
+Do not leave the checkout on a feature branch or with uncommitted edits: the services run
+whatever is in the working tree. Run `git pull` as your own user, not with `sudo`, or git's
+files become root-owned. From a checkout elsewhere, `install.sh` does a normal (copying) install
+instead, and an update means running it again.
+
 Options: `--no-db` (use an existing or remote database: edit the `url` in the toml),
 `--no-services`, `--no-packages`, `--user NAME`. Paths are fixed because the unit files use them.
 
@@ -75,7 +91,7 @@ sudo useradd --system --home-dir /var/lib/dozimetrix --shell /usr/sbin/nologin d
 sudo install -d -m 0750 -o root -g dozimetrix /etc/dozimetrix
 sudo install -d -m 0700 -o dozimetrix -g dozimetrix /var/lib/dozimetrix /var/lib/dozimetrix/spool
 sudo python3.12 -m venv /opt/dozimetrix/.venv
-sudo /opt/dozimetrix/.venv/bin/pip install .          # from the checkout
+sudo /opt/dozimetrix/.venv/bin/pip install .          # from a checkout elsewhere; with the checkout in /opt/dozimetrix: pip install -e .
 sudo cp -r deploy /opt/dozimetrix/deploy
 ```
 ```sql
