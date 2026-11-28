@@ -71,7 +71,14 @@ PY
     mkdir -p "$WORK/t"; tar -C "$WORK/t" -xzf "$PF"
     CDIR=$(dirname "$CONFIG")
     [ -d "$WORK/t/etc" ] && cp -a "$WORK/t/etc/." "$CDIR/"
-    [ -f "$WORK/t/secret" ] && install -m 600 "$WORK/t/secret" "$DATA_DIR/secret"
+    SECRET=$("$PYTHON" -I - "$CONFIG" "$CDIR" <<'PY'
+import sys, tomllib, pathlib
+raw = tomllib.load(open(sys.argv[1], "rb"))
+print(raw.get("security", {}).get("secret_file") or raw.get("paths", {}).get("secret_file")
+      or raw.get("secret_file") or pathlib.Path(sys.argv[2]) / "secret")
+PY
+)
+    [ -f "$WORK/t/secret" ] && { mkdir -p "$(dirname "$SECRET")"; install -m 600 "$WORK/t/secret" "$SECRET"; }
     [ -d "$WORK/t/spool" ] && cp -a "$WORK/t/spool/." "$DATA_DIR/spool/"
     chown -R dozimetrix:dozimetrix "$DATA_DIR" 2>/dev/null || true
     # the web unit migrates nothing by itself in this install: bring the schema to this code's head

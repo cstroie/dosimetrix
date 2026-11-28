@@ -74,7 +74,8 @@ else
     SECRET=$("$PYTHON" -I - "$CONFIG" "$CDIR" <<'PY'
 import sys, tomllib, pathlib
 raw = tomllib.load(open(sys.argv[1], "rb"))
-print(raw.get("paths", {}).get("secret_file") or raw.get("secret_file") or pathlib.Path(sys.argv[2]) / "secret")
+print(raw.get("security", {}).get("secret_file") or raw.get("paths", {}).get("secret_file")
+      or raw.get("secret_file") or pathlib.Path(sys.argv[2]) / "secret")
 PY
 )
     [ -f "$SECRET" ] && cp -a "$SECRET" "$TREE/secret"
